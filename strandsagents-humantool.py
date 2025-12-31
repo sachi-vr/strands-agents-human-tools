@@ -14,17 +14,18 @@ def get_current_datetime() -> str:
     """Get the current date and time."""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-def human_screen_capture(resizeRatio:float=0.25) -> bytes:
+def human_screen_capture(resizeRatio:float=0.2) -> bytes:
     """Montor what the human is doing in PC screen."""
 
     with mss.mss() as sct:
         # 全画面キャプチャ
-        monitor = sct.monitors[0]  # 全画面のモニター情報を取得
+        monitor = sct.monitors[0]  # 0は全モニタ、1は主モニタ
         screenshot = sct.grab(monitor)
         # mssのScreenShotオブジェクトをPillowのImageオブジェクトに変換
         img = PIL.Image.frombytes("RGB", screenshot.size, screenshot.rgb)
         new_size = (int(img.width * resizeRatio), int(img.height * resizeRatio)) # 幅と高さを50%にリサイズ
-        img_resized = img.resize(new_size, PIL.Image.LANCZOS)
+        _resampling = getattr(PIL.Image, 'Resampling', PIL.Image)
+        img_resized = img.resize(new_size, _resampling.LANCZOS)
         buffer = io.BytesIO()
         img_resized.save(buffer, format='PNG', optimize=True, compress_level=9)
         # Reset the buffer position to the beginning
@@ -58,6 +59,36 @@ def speak(text:str) -> bool:
     engine.runAndWait()
     return True
 
+def decide_capture_mode(user_instruction: str, model: LiteLLMModel, system_prompt_prefix: str) -> str:
+    """Decide capture mode based on the user's instruction.
+    Returns one of: 'webcam_capture', 'screen_capture', 'alternate'."""
+    prompt = (
+        "あなたはシステム設定エージェントです。次の指示文から、"
+        "人間の監視に最適なキャプチャモードを1つだけ選んでください。"
+        "必ず以下のいずれかを返してください:\n"
+        "  - webcam_capture(Webカメラ)\n"
+        "  - screen_capture(画面のスクリーンショット)\n"
+        "  - alternate(カメラと画面の交互)\n"
+        "悩む場合は、'alternate'を選んでください。\n"
+        "理由や余分なテキストは書かないでください。\n\n"
+        f"指示文:\n{user_instruction}"
+    )
+    agent = Agent(model=litellm_model, system_prompt=prompt, messages=[Message(role='user', content=[{'text': user_instruction}])])
+    try:
+        res = agent()
+        res_text = str(res).strip().lower()
+    except Exception as e:
+        print("Warning: mode decision agent failed:", e)
+        res_text = ""
+    if "webcam" in res_text or "カメラ" in res_text:
+        return "webcam_capture"
+    if "screen" in res_text or "スクリーン" in res_text:
+        return "screen_capture"
+    if "alternate" in res_text or "交互" in res_text:
+        return "alternate"
+    # fallback to interactive prompt
+    return "alternate"
+
 ## ここから下は実行部分 ##
 import logging
 #logging.getLogger("strands").setLevel(logging.DEBUG)
@@ -88,6 +119,9 @@ print(systemp)
 previous_status="今の状況: 開始状態"
 loopcnt=0
 
+mode = decide_capture_mode(userorder, litellm_model, systemp)
+print("選択されたキャプチャモード:", mode)
+
 # Initialize messages once so history is preserved; exclude image elements
 messages: list[Message] = [
     Message(
@@ -99,16 +133,35 @@ messages: list[Message] = [
 while True:
     loopcnt += 1
     print("\n---- loop "+str(loopcnt)+" -----")
+    # capture according to selected mode
+    try:
+        if mode == "webcam_capture":
+            source_bytes = human_webcam_capture()
+            source_str:str = "webcam"
+        elif mode == "screen_capture":
+            source_bytes = human_screen_capture()
+            source_str:str = "screen"
+        else:  # alternate
+            if loopcnt % 2 != 0:
+                source_bytes = human_webcam_capture()
+                source_str:str = "webcam"
+            else:
+                source_bytes = human_screen_capture()
+                source_str:str = "screen"
+    except Exception as e:
+        print("Warning: capture failed, falling back to screen capture:", e)
+        source_bytes = human_screen_capture()
+
     user_msg = Message(
         role="user",
         content=[
             {
-                "text": f"""{ get_current_datetime() }現在の状況です。"""
+                "text": f"""{ get_current_datetime() }現在の{ source_str }状況です。"""
             },
             {
                 "image": {
                     "format": "png",
-                    "source": {"bytes": human_webcam_capture() if loopcnt % 2 != 0 else human_screen_capture()}
+                    "source": {"bytes": source_bytes}
                 }
             }
         ]
