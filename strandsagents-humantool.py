@@ -99,11 +99,6 @@ messages: list[Message] = [
 while True:
     loopcnt += 1
     print("\n---- loop "+str(loopcnt)+" -----")
-
-    # messagesに含まれる、画像要素を削除しておく
-    for m in messages:
-        if hasattr(m, "content") and isinstance(m.content, list): # type: ignore
-            m.content = [c for c in m.content if not (isinstance(c, dict) and "image" in c)] # type: ignore
     import pprint
     print("---- messages ----")
     pprint.pprint(messages)
@@ -112,13 +107,13 @@ while True:
         role="user",
         content=[
             {
+                "text": f"""{ get_current_datetime() }現在の状況です。"""
+            },
+            {
                 "image": {
                     "format": "png",
                     "source": {"bytes": human_webcam_capture()}
                 }
-            },
-            {
-                "text": f"""{ get_current_datetime() }現在の状況です。"""
             }
         ]
     )
@@ -128,7 +123,14 @@ while True:
     result = agent()
     previous_status = str(result)
 
-    # Append assistant reply to history
-    messages.append(Message(role="assistant", content=[{"text": previous_status}]))
+    # messagesは参照渡しなので、すでに更新されていた
+    #messages.append(Message(role="assistant", content=[{"text": previous_status}]))
     #print("\n----- previous_status -----")
     #print(previous_status)
+    newmessages = []
+    for m in messages[-5:]:
+        newrole=m.get("role","unknown")
+        newcontent=m.get("content", [{ "text": "unkowntext1" }])
+        newcont0=newcontent[0]
+        newmessages.append(Message(role=newrole, content=[newcont0]))
+    messages = newmessages
