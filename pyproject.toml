@@ -1,0 +1,14 @@
+[project]
+name = "strands-agents-human-tools"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "lmstudio>=1.5.0",
+    "mss>=10.1.0",
+    "opencv-python>=4.12.0.88",
+    "pillow>=12.0.0",
+    "pyttsx3>=2.99",
+    "strands-agents[litellm]>=1.20.0",
+]
