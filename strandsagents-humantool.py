@@ -14,7 +14,7 @@ def get_current_datetime() -> str:
     """Get the current date and time."""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-def human_screen_capture(resizeRatio:float=1.0) -> bytes:
+def human_screen_capture(resizeRatio:float=0.25) -> bytes:
     """Montor what the human is doing in PC screen."""
 
     with mss.mss() as sct:
@@ -99,10 +99,6 @@ messages: list[Message] = [
 while True:
     loopcnt += 1
     print("\n---- loop "+str(loopcnt)+" -----")
-    import pprint
-    print("---- messages ----")
-    pprint.pprint(messages)
-
     user_msg = Message(
         role="user",
         content=[
@@ -112,7 +108,7 @@ while True:
             {
                 "image": {
                     "format": "png",
-                    "source": {"bytes": human_webcam_capture()}
+                    "source": {"bytes": human_webcam_capture() if loopcnt % 2 != 0 else human_screen_capture()}
                 }
             }
         ]
@@ -134,3 +130,6 @@ while True:
         newcont0=newcontent[0]
         newmessages.append(Message(role=newrole, content=[newcont0]))
     messages = newmessages
+    import pprint
+    print("---- messages ----")
+    pprint.pprint(messages)
