@@ -99,7 +99,7 @@ def decide_capture_mode(user_instruction: str, model: LiteLLMModel, system_promp
         "理由や余分なテキストは書かないでください。\n\n"
         f"指示文:\n{user_instruction}"
     )
-    agent = Agent(model=litellm_model, system_prompt=prompt, messages=[Message(role='user', content=[{'text': user_instruction}])])
+    agent = Agent(model=model, system_prompt=prompt, messages=[Message(role='user', content=[{'text': user_instruction}])])
     try:
         res = agent()
         res_text = str(res).strip().lower()
@@ -115,105 +115,109 @@ def decide_capture_mode(user_instruction: str, model: LiteLLMModel, system_promp
     # fallback to interactive prompt
     return "alternate"
 
-## ここから下は実行部分 ##
+
 import logging
 #logging.getLogger("strands").setLevel(logging.DEBUG)
 #logging.basicConfig(
 #    format="%(levelname)s | %(name)s | %(message)s", 
 #    handlers=[logging.StreamHandler()]
 #)
-
-# pythonのlmstudioライブラリでモデルのロード
-modelstr:str="qwen/qwen3-vl-8b"
-model = lms.llm(modelstr, ttl=180)
-
-all_loaded_models = lms.list_loaded_models()
-print("Loaded models:", all_loaded_models)
-
-# LiteLLM用のLM Studio設定の環境変数
-os.environ["OPENAI_API_BASE"] = "http://localhost:1234/v1"
-os.environ["OPENAI_API_KEY"] = "lm-studio"  # 任意の文字列（LM Studioは無視）
-
-# LM Studio の OpenAI 互換エンドポイントを指定
-# モデル名にlm_studio/が付く
-litellm_model = LiteLLMModel(model_id="lm_studio/"+modelstr)
-
-userorder:str=input("指示を入力:").strip()
-print("----")
-systemp:str="指示: "+userorder
-print(systemp)
-previous_status="今の状況: 開始状態"
-loopcnt=0
-
-mode = decide_capture_mode(userorder, litellm_model, systemp)
-print("選択されたキャプチャモード:", mode)
-
-# Tool call limiter (max 3 tool calls per loop iteration)
-tool_limiter = ToolCallLimiter(max_tool_calls=1)
-
-# Initialize messages once so history is preserved; exclude image elements
-messages: list[Message] = [
-    Message(
-        role="assistant",
-        content=[{ "text": f"{previous_status}" }]
-    )
-]
-
-while True:
-    loopcnt += 1
-    print("\n---- loop "+str(loopcnt)+" -----")
-    # Reset tool call counter for each loop iteration
-    tool_limiter.reset()
-    # capture according to selected mode
-    try:
-        if mode == "webcam_capture":
-            source_bytes = human_webcam_capture()
-            source_str:str = "webcam"
-        elif mode == "screen_capture":
-            source_bytes = human_screen_capture()
-            source_str:str = "screen"
-        else:  # alternate
-            if loopcnt % 2 != 0:
+    
+def main():
+    # pythonのlmstudioライブラリでモデルのロード
+    modelstr:str="qwen/qwen3-vl-8b"
+    model = lms.llm(modelstr, ttl=180)
+    
+    all_loaded_models = lms.list_loaded_models()
+    print("Loaded models:", all_loaded_models)
+    
+    # LiteLLM用のLM Studio設定の環境変数
+    os.environ["OPENAI_API_BASE"] = "http://localhost:1234/v1"
+    os.environ["OPENAI_API_KEY"] = "lm-studio"  # 任意の文字列（LM Studioは無視）
+    
+    # LM Studio の OpenAI 互換エンドポイントを指定
+    # モデル名にlm_studio/が付く
+    litellm_model = LiteLLMModel(model_id="lm_studio/"+modelstr)
+    
+    userorder:str=input("指示を入力:").strip()
+    print("----")
+    systemp:str="指示: "+userorder
+    print(systemp)
+    previous_status="今の状況: 開始状態"
+    loopcnt=0
+    
+    mode = decide_capture_mode(userorder, litellm_model, systemp)
+    print("選択されたキャプチャモード:", mode)
+    
+    # Tool call limiter (max 3 tool calls per loop iteration)
+    tool_limiter = ToolCallLimiter(max_tool_calls=1)
+    
+    # Initialize messages once so history is preserved; exclude image elements
+    messages: list[Message] = [
+        Message(
+            role="assistant",
+            content=[{ "text": f"{previous_status}" }]
+        )
+    ]
+    
+    while True:
+        loopcnt += 1
+        print("\n---- loop "+str(loopcnt)+" -----")
+        # Reset tool call counter for each loop iteration
+        tool_limiter.reset()
+        # capture according to selected mode
+        try:
+            if mode == "webcam_capture":
                 source_bytes = human_webcam_capture()
                 source_str:str = "webcam"
-            else:
+            elif mode == "screen_capture":
                 source_bytes = human_screen_capture()
                 source_str:str = "screen"
-    except Exception as e:
-        print("Warning: capture failed, falling back to screen capture:", e)
-        source_bytes = human_screen_capture()
-
-    user_msg = Message(
-        role="user",
-        content=[
-            {
-                "text": f"""{ get_current_datetime() }現在の{ source_str }状況です。"""
-            },
-            {
-                "image": {
-                    "format": "png",
-                    "source": {"bytes": source_bytes}
+            else:  # alternate
+                if loopcnt % 2 != 0:
+                    source_bytes = human_webcam_capture()
+                    source_str:str = "webcam"
+                else:
+                    source_bytes = human_screen_capture()
+                    source_str:str = "screen"
+        except Exception as e:
+            print("Warning: capture failed, falling back to screen capture:", e)
+            source_bytes = human_screen_capture()
+    
+        user_msg = Message(
+            role="user",
+            content=[
+                {
+                    "text": f"""{ get_current_datetime() }現在の{ source_str }状況です。"""
+                },
+                {
+                    "image": {
+                        "format": "png",
+                        "source": {"bytes": source_bytes}
+                    }
                 }
-            }
-        ]
-    )
-    messages.append(user_msg)
+            ]
+        )
+        messages.append(user_msg)
+    
+        agent = Agent(model=litellm_model, system_prompt=systemp, messages=messages, tools=[speak], hooks=[tool_limiter])
+        result = agent()
+        previous_status = str(result)
+    
+        # messagesは参照渡しなので、すでに更新されていた
+        #messages.append(Message(role="assistant", content=[{"text": previous_status}]))
+        #print("\n----- previous_status -----")
+        #print(previous_status)
+        newmessages = []
+        for m in messages[-10:]:
+            newrole=m.get("role","unknown")
+            newcontent=m.get("content", [{ "text": "unkowntext1" }])
+            newcont0=newcontent[0]
+            newmessages.append(Message(role=newrole, content=[newcont0]))
+        messages = newmessages
+        import pprint
+        print("---- messages ----")
+        pprint.pprint(messages)
 
-    agent = Agent(model=litellm_model, system_prompt=systemp, messages=messages, tools=[speak], hooks=[tool_limiter])
-    result = agent()
-    previous_status = str(result)
-
-    # messagesは参照渡しなので、すでに更新されていた
-    #messages.append(Message(role="assistant", content=[{"text": previous_status}]))
-    #print("\n----- previous_status -----")
-    #print(previous_status)
-    newmessages = []
-    for m in messages[-5:]:
-        newrole=m.get("role","unknown")
-        newcontent=m.get("content", [{ "text": "unkowntext1" }])
-        newcont0=newcontent[0]
-        newmessages.append(Message(role=newrole, content=[newcont0]))
-    messages = newmessages
-    import pprint
-    print("---- messages ----")
-    pprint.pprint(messages)
+if __name__ == "__main__":
+    main()
