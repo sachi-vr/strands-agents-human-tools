@@ -1,6 +1,7 @@
 import cv2
 import os
 import io
+import argparse
 import PIL.Image
 import lmstudio as lms
 from strands import Agent
@@ -123,31 +124,61 @@ import logging
 #    handlers=[logging.StreamHandler()]
 #)
     
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Human monitoring agent with webcam/screen capture")
+    parser.add_argument(
+        "-m", "--mode",
+        type=str,
+        choices=["webcam_capture", "screen_capture", "alternate"],
+        default=None,
+        help="キャプチャモード: webcam_capture(Webカメラ), screen_capture(画面), alternate(交互)"
+    )
+    parser.add_argument(
+        "-i", "--instruction",
+        type=str,
+        default=None,
+        help="エージェントへの指示文"
+    )
+    return parser.parse_args()
+
+
 def main():
+    # コマンドライン引数のパース
+    args = parse_args()
+
     # pythonのlmstudioライブラリでモデルのロード
     modelstr:str="qwen/qwen3-vl-8b"
     model = lms.llm(modelstr, ttl=180)
-    
+
     all_loaded_models = lms.list_loaded_models()
     print("Loaded models:", all_loaded_models)
-    
+
     # LiteLLM用のLM Studio設定の環境変数
     os.environ["OPENAI_API_BASE"] = "http://localhost:1234/v1"
     os.environ["OPENAI_API_KEY"] = "lm-studio"  # 任意の文字列（LM Studioは無視）
-    
+
     # LM Studio の OpenAI 互換エンドポイントを指定
     # モデル名にlm_studio/が付く
     litellm_model = LiteLLMModel(model_id="lm_studio/"+modelstr)
-    
-    userorder:str=input("指示を入力:").strip()
+
+    # 指示の取得: コマンドライン引数があればそれを使用、なければ対話入力
+    if args.instruction:
+        userorder:str = args.instruction
+    else:
+        userorder:str = input("指示を入力:").strip()
     print("----")
     systemp:str="指示: "+userorder
     print(systemp)
     previous_status="今の状況: 開始状態"
     loopcnt=0
-    
-    mode = decide_capture_mode(userorder, litellm_model, systemp)
-    print("選択されたキャプチャモード:", mode)
+
+    # モードの取得: コマンドライン引数があればそれを使用、なければAIが判断
+    if args.mode:
+        mode = args.mode
+    else:
+        mode = decide_capture_mode(userorder, litellm_model, systemp)
+    print("キャプチャモード:", mode)
     
     # Tool call limiter (max 3 tool calls per loop iteration)
     tool_limiter = ToolCallLimiter(max_tool_calls=1)
