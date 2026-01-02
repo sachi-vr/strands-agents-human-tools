@@ -6,6 +6,8 @@ import lmstudio as lms
 from strands import Agent
 from strands.models.litellm import LiteLLMModel
 from strands.types.content import Message
+from strands.hooks import HookProvider, HookRegistry
+from strands.hooks.events import BeforeToolCallEvent, AfterToolCallEvent
 import time
 from strands import tool
 import mss
@@ -49,6 +51,30 @@ def human_webcam_capture() ->  bytes:
     # Reset the buffer position to the beginning
     buffer.seek(0)
     return buffer.getvalue()
+
+class ToolCallLimiter(HookProvider):
+    """Limits the number of tool calls per agent invocation."""
+
+    def __init__(self, max_tool_calls: int = 3):
+        self.max_tool_calls = max_tool_calls
+        self.tool_call_count = 0
+
+    def register_hooks(self, registry: HookRegistry) -> None:
+        registry.add_callback(BeforeToolCallEvent, self.check_limit)
+        registry.add_callback(AfterToolCallEvent, self.count_call)
+
+    def check_limit(self, event: BeforeToolCallEvent) -> None:
+        if self.tool_call_count >= self.max_tool_calls:
+            event.cancel_tool = f"Tool call limit ({self.max_tool_calls}) reached"
+            print(f"⚠️ Tool call cancelled: limit of {self.max_tool_calls} reached")
+
+    def count_call(self, event: AfterToolCallEvent) -> None:
+        self.tool_call_count += 1
+        print(f"🔧 Tool call {self.tool_call_count}/{self.max_tool_calls}")
+
+    def reset(self) -> None:
+        """Reset the counter for a new agent invocation."""
+        self.tool_call_count = 0
 
 import pyttsx3
 @tool
@@ -122,6 +148,9 @@ loopcnt=0
 mode = decide_capture_mode(userorder, litellm_model, systemp)
 print("選択されたキャプチャモード:", mode)
 
+# Tool call limiter (max 3 tool calls per loop iteration)
+tool_limiter = ToolCallLimiter(max_tool_calls=1)
+
 # Initialize messages once so history is preserved; exclude image elements
 messages: list[Message] = [
     Message(
@@ -133,6 +162,8 @@ messages: list[Message] = [
 while True:
     loopcnt += 1
     print("\n---- loop "+str(loopcnt)+" -----")
+    # Reset tool call counter for each loop iteration
+    tool_limiter.reset()
     # capture according to selected mode
     try:
         if mode == "webcam_capture":
@@ -168,7 +199,7 @@ while True:
     )
     messages.append(user_msg)
 
-    agent = Agent(model=litellm_model, system_prompt=systemp, messages=messages, tools=[speak])
+    agent = Agent(model=litellm_model, system_prompt=systemp, messages=messages, tools=[speak], hooks=[tool_limiter])
     result = agent()
     previous_status = str(result)
 
